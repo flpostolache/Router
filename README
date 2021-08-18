@@ -1,0 +1,95 @@
+Nume: Florin Postolache
+Grupa: 325CC
+
+Prescurtari folosite:
+	-network byte order = nbo
+	-host byte order = hbo
+
+Probleme intampinate:
+
+	a.In implementarea parsarii tabelei de rutare:
+		In prima implementare a parsarii tabelei de rutare, citeam din
+	fisierul primit ca parametru, linie cu linie. Problema aparea cand incercam
+	sa sa separ adresele si interfata de pe aceeasi linie. Incercam sa folosesc
+	strtok, o data cu " " ca delimitator, pentru a selecta doar un camp de pe 
+	respectiva linie, iar apoi, foloseam iar strtok cu delimitatorul "." pentru
+	a selecta doar numarul pana la ".". Problema aparea deoarece strtok tine
+	singur minte pe ce pozite a ramas intr-un string, lucru care il face
+	ineficient, cand vrei sa il folosesti in cazul de fata.
+	
+	b.In implementarea router-ului:
+		A durat ceva pana cand am inteles cum se extrag headerele dintr-un
+	pachet. Totodata, din vina mea (nu am citit toate functiile oferite in
+	tema), nu am realizat ca anumite chestii le pot face mai usor.
+	
+	
+Abordarea implementarii:
+
+	Vazand ca pierd 30 de puncte daca nu implementez protocolul de tip ARP,
+am plecat direct cu implementarea temei, luand in considerare si mesaje de tip
+ARP.
+	Am ajuns sa implementez de 3 ori parsarea tabelei de rutare (prima este
+povestita mai sus, iar restul imediat mai jos).
+	In a doua implementare a parsarii tabelei de rutare, foloseam o singura
+data strtok, de data aceasta, avand ca delimitator " .". Citeam de fiecare data
+numarul ori pana la spatiu, ori pana la ".". Converteam apoi numarul in int 
+folosind atoi si il puneam pe pozitia corecta (pentru a respecta si endianess-ul)
+din campul corespunzator al structurii. Faceam asta de 4 ori pentru prefix, de 
+4 ori pentru next hop, de 4 ori pentru masca si o data pentru interfata.
+	In a treia si ultima implementare a acestei functii, am descoperit functia
+inet_aton care, converteste un string care reprezinta o adresa ip, intr-o valoare
+numerica ( care se stocheaza intr-o structura de tip in_addr ) in nbo. Convertesc
+apoi acea valoare in hbo si o salvez intr-un u_int32_t ( valabil pentru prefix, 
+next_hop si masca ) pentru a le trece mai apoi in vectorul de structuri, dupa 
+ce ii maresc dimensiunea. Singura valoare pe care nu o convertesc in hbo este 
+interfata, pe care o salvez intr-o variabila de tip u_int8_t.
+
+	Implementare in sine a routerului:
+	
+	-in momentul in care primesc un pachet, ii extrag header-ul de tip ethernet
+si verific tipul pachetului (in campul h_proto, verific daca pachetul este de tip
+ARP sau IP).
+	-daca pachetul este de tip ARP:
+		a. Extrag headerul de tip ARP cu funtia parse_arp verific daca pachetul
+	este un ARP REPLY sau ARP REQUEST (verific asta prin campul op din stuctura
+	header-ului ARP)
+		b. Daca pachetul este un ARP REQUEST si imi este destinat mie, 
+	inseamna ca un dispozitiv mi-a cerut adresa mac. Creez un header nou de
+	tip ethernet in care completez informatiile necesare pentru un ARP REPLY
+	(in campul h_dest, pun adresa mac a dispozitivului de la care am primit
+	pachetul, in campul h_source pun adresa mac de pe interfata pe care s-a
+	trimis pachetul si in campul proto completez ca mesajul este unul de tip
+	ARP). Ma folosesc apoi de functia send_arp pentru a trimite un mesaj de
+	tip ARP REPLY, dispozitivului care mi-a solicitat adresa mac.
+		c. Daca pachetul este un ARP REPLY si imi este destinat mie,
+	inseamna ca trebuie sa primesc o adresa mac, pe care am cerut-o inainte.
+	Maresc dimensiunea tabelei ARP si adauga adresa mac. In campul ip pun
+	adresa ip a next-hop-ului (luat din header-ul ARP al mesajului, campul
+	spa) si in campul adresei mac pun sha-ul din header-ul ARP. Apoi verific
+	mesajele din coada. Cat timp coada nu este goala si gasesc in ea pachete
+	pe care le pot trimite cu noua adresa mac primita, le trimit.
+	
+	-daca pachetul este de tip IP:
+		a. Extrag header-ul de tip IP si verific daca pachetul imi este
+	destinat mie. In cazul afirmativ, verific daca pachetul este de tip icmp.
+	Daca este si de tip icmp extrag header-ul icmp si verific daca este un
+	icmp echo request. Daca este trimit un send icmp de tipul echo reply
+	cu ajutorul functiei send icmp. In caz contrar, arunc pachetul.
+		b. Daca pachetul nu imi este destinat mie verific daca ttl-ul
+	sau este mai mic sau egal cu 1. In cazul afirmativ trimit un mesaj
+	de tip Time exceeded inapoi la destinatie si arunc pachetul.
+		c. Daca ttl este mai mare ca 1, verific daca pachetul are
+	checksum-ul corect (cu functia ip_checksum). In caz afirmativ continui
+	procesul de trimitere a pachetului mai departe.
+		d. Decrementez ttl-ul si updatez checksum-ul.
+		e. Caut cea mai specifica intrare din tabela de rutare cu functia
+	get_best_route. In cazul in care aceasta returneaza NULL, inseamna ca nu
+	exista o ruta pana la destinatie. Intorc un mesaj de tip destination
+	unreachable si arunc pachetul.
+		f. Caut in tabela arp adresa mac corespunzatoare next-hop-ului.
+	Daca nu o gasesc, bag pachetul in coada pentru a-l transmite mai tarziu.
+	Daca o gasesc, modific adresele mac de destinatie si sursa si trimit pachetul.
+	
+	
+	
+	
